@@ -56,7 +56,7 @@ public:
     // Return true, if physical printer was selected 
     // and next internal selection was accomplished
     bool selection_is_changed_according_to_physical_printers();
-
+    Preset::Type     get_type() { return m_type; }
     void update(std::string select_preset);
 
     void edit_physical_printer();
