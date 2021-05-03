@@ -4426,10 +4426,10 @@ void GCodeViewer::render_legend() const
         };
         using PartialTimes = std::vector<PartialTime>;
 
-        auto generate_partial_times = [this](const TimesList& times, const std::vector<float>& used_filaments) {
+        auto generate_partial_times = [this](const TimesList& times, const std::vector<double>& used_filaments) {
             PartialTimes items;
 
-            auto get_used_filament = [](float volume, int extruder_id) {
+            auto get_used_filament = [](double volume, int extruder_id) {
                 const std::vector<std::string>& filament_presets = wxGetApp().preset_bundle->filament_presets;
                 const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
                 std::pair<double, double>  ret = { 0.0f, 0.0f };
@@ -4531,7 +4531,7 @@ void GCodeViewer::render_legend() const
             }
         };
 
-        PartialTimes partial_times = generate_partial_times(time_mode.custom_gcode_times, m_print_statistics.used_filaments);
+        PartialTimes partial_times = generate_partial_times(time_mode.custom_gcode_times, m_print_statistics.volumes_per_color_change);
         if (!partial_times.empty()) {
             labels.clear();
             times.clear();
@@ -4545,7 +4545,19 @@ void GCodeViewer::render_legend() const
                 }
                 times.push_back(short_time(get_time_dhms(item.times.second)));
             }
-            offsets = calculate_offsets(labels, times, { _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), /*_u8L("Filament (m)")*/_u8L("Used filament") }, 2.0f * icon_size);
+
+
+            std::string longest_used_filament_string;
+            for (const PartialTime& item : partial_times) {
+                if (item.used_filament.first > 0.0f) {
+                    char buffer[64];
+                    ::sprintf(buffer, "%.2f m", item.used_filament.first);
+                    if (::strlen(buffer) > longest_used_filament_string.length())
+                        longest_used_filament_string = buffer;
+                }
+            }
+
+            offsets = calculate_offsets(labels, times, { _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), longest_used_filament_string }, 2.0f * icon_size);
 
             ImGui::Spacing();
             append_headers({ _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), /*_u8L("Filament (m)"), _u8L("Filament (g)")*/_u8L("Used filament") }, offsets);

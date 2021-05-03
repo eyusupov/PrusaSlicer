@@ -56,7 +56,8 @@ namespace Slic3r {
             }
         };
 
-        std::vector<float> used_filaments;
+        std::vector<double>         volumes_per_color_change;
+        std::map<size_t, double>    volumes_per_extruder;
 
         std::array<Mode, static_cast<size_t>(ETimeMode::Count)> modes;
 
@@ -66,7 +67,8 @@ namespace Slic3r {
             for (auto m : modes) {
                 m.reset();
             }
-            used_filaments.clear();
+            volumes_per_color_change.clear();
+            volumes_per_extruder.clear();
         }
     };
 
@@ -326,11 +328,17 @@ namespace Slic3r {
 
         struct UsedFilaments  // filaments per ColorChange
         {
-            bool needed;
-            float cache;
-            std::vector<float> volumes;
+            double color_change_cache;
+            std::vector<double> volumes_per_color_change;
+
+            size_t active_extruder_id;
+            double tool_change_cache;
+            std::map<size_t, double> volumes_per_extruder;
 
             void reset();
+            void process_color_change_cache();
+            void process_extruder_cache();
+            void process_caches();
         };
 
     public:
@@ -691,7 +699,7 @@ namespace Slic3r {
         float get_filament_unload_time(size_t extruder_id);
 
         void process_custom_gcode_time(CustomGCode::Type code);
-        void process_custom_gcode_filament(CustomGCode::Type code);
+        void process_filaments(CustomGCode::Type code);
 
         // Simulates firmware st_synchronize() call
         void simulate_st_synchronize(float additional_time = 0.0f);

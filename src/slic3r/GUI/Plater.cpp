@@ -1204,7 +1204,7 @@ void Sidebar::update_sliced_info_sizer()
                             filament_weight = ps.total_weight;
                         else {
                             double filament_density = filament_preset->config.opt_float("filament_density", 0);
-                            filament_weight = filament.second * filament_density * 2.4052f * 0.001; // assumes 1.75mm filament diameter;
+                            filament_weight = filament.second * filament_density/* *2.4052f*/ * 0.001; // assumes 1.75mm filament diameter;
 
                             new_label += "\n    - " + format_wxstr(_L("Filament at extruder %1%"), filament.first + 1);
                             info_text += wxString::Format("\n%.2f", filament_weight);

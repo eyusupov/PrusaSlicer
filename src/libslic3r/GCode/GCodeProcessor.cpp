@@ -188,9 +188,38 @@ void GCodeProcessor::TimeMachine::CustomGCodeTime::reset()
 
 void GCodeProcessor::UsedFilaments::reset()
 {
-    needed = false;
-    cache = 0.0f;
-    volumes = std::vector<float>();
+    color_change_cache = 0.0f;
+    volumes_per_color_change = std::vector<double>();
+
+    active_extruder_id = 0;
+
+    tool_change_cache = 0.0f;
+    volumes_per_extruder.clear();
+}
+
+void GCodeProcessor::UsedFilaments::process_color_change_cache()
+{
+    if (color_change_cache != 0.0f) {
+        volumes_per_color_change.push_back(color_change_cache);
+        color_change_cache = 0.0f;
+    }
+}
+
+void GCodeProcessor::UsedFilaments::process_extruder_cache()
+{
+    if (tool_change_cache != 0.0f) {
+        if (volumes_per_extruder.find(active_extruder_id) != volumes_per_extruder.end())
+            volumes_per_extruder[active_extruder_id] += tool_change_cache;
+        else
+            volumes_per_extruder[active_extruder_id] = tool_change_cache;
+        tool_change_cache = 0.0f;
+    }
+}
+
+void GCodeProcessor::UsedFilaments::process_caches()
+{
+    process_color_change_cache();
+    process_extruder_cache();
 }
 
 void GCodeProcessor::TimeMachine::reset()
@@ -1183,8 +1212,7 @@ void GCodeProcessor::process_file(const std::string& filename, bool apply_postpr
             gcode_time.times.push_back({ CustomGCode::ColorChange, gcode_time.cache });
     }
 
-    if (m_used_filaments.needed && m_used_filaments.cache != 0.0f)
-        m_used_filaments.volumes.push_back(m_used_filaments.cache);
+    m_used_filaments.process_caches();
 
     update_estimated_times_stats();
 
@@ -1543,7 +1571,7 @@ void GCodeProcessor::process_tags(const std::string_view comment)
         }
 
         process_custom_gcode_time(CustomGCode::ColorChange);
-        process_custom_gcode_filament(CustomGCode::ColorChange);
+        process_filaments(CustomGCode::ColorChange);
 
         return;
     }
@@ -2162,7 +2190,8 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line)
         float area_toolpath_cross_section = volume_extruded_filament / delta_xyz;
 
         // save extruded volume to the cache
-        m_used_filaments.cache += volume_extruded_filament;
+        m_used_filaments.color_change_cache += volume_extruded_filament;
+        m_used_filaments.tool_change_cache  += volume_extruded_filament;
 
         // volume extruded filament / tool displacement = area toolpath cross section
         m_mm3_per_mm = area_toolpath_cross_section;
@@ -2812,6 +2841,9 @@ void GCodeProcessor::process_T(const std::string_view command)
                     m_time_processor.extruder_unloaded = false;
                     extra_time += get_filament_load_time(static_cast<size_t>(m_extruder_id));
                     simulate_st_synchronize(extra_time);
+
+                    process_filaments(CustomGCode::ToolChange);
+                    m_used_filaments.active_extruder_id = id;
                 }
 
                 // store tool change move
@@ -2981,13 +3013,13 @@ void GCodeProcessor::process_custom_gcode_time(CustomGCode::Type code)
     }
 }
 
-void GCodeProcessor::process_custom_gcode_filament(CustomGCode::Type code)
+void GCodeProcessor::process_filaments(CustomGCode::Type code)
 {
-    m_used_filaments.needed = true;
-    if (m_used_filaments.cache != 0.0f && code == CustomGCode::ColorChange) {
-        m_used_filaments.volumes.push_back({ m_used_filaments.cache });
-        m_used_filaments.cache = 0.0f;
-    }
+    if (code == CustomGCode::ColorChange)
+        m_used_filaments.process_color_change_cache();
+
+    if (code == CustomGCode::ToolChange)
+        m_used_filaments.process_extruder_cache();
 }
 
 void GCodeProcessor::simulate_st_synchronize(float additional_time)
@@ -3014,7 +3046,8 @@ void GCodeProcessor::update_estimated_times_stats()
     else
         m_result.print_statistics.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Stealth)].reset();
 
-    m_result.print_statistics.used_filaments = m_used_filaments.volumes;
+    m_result.print_statistics.volumes_per_color_change = m_used_filaments.volumes_per_color_change;
+    m_result.print_statistics.volumes_per_extruder = m_used_filaments.volumes_per_extruder;
 }
 
 } /* namespace Slic3r */
