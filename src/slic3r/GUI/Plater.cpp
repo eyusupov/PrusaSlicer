@@ -1173,10 +1173,10 @@ void Sidebar::update_sliced_info_sizer()
                 new_label += format_wxstr(":\n    - %1%\n    - %2%", _L("objects"), _L("wipe tower"));
 
             wxString info_text = is_wipe_tower ?
-                                wxString::Format("%.2f \n%.2f \n%.2f", ps.total_used_filament / /*1000*/koef,
-                                                (ps.total_used_filament - ps.total_wipe_tower_filament) / /*1000*/koef,
-                                                ps.total_wipe_tower_filament / /*1000*/koef) :
-                                wxString::Format("%.2f", ps.total_used_filament / /*1000*/koef);
+                                wxString::Format("%.2f \n%.2f \n%.2f", ps.total_used_filament / koef,
+                                                (ps.total_used_filament - ps.total_wipe_tower_filament) / koef,
+                                                ps.total_wipe_tower_filament / koef) :
+                                wxString::Format("%.2f", ps.total_used_filament / koef);
             p->sliced_info->SetTextAndShow(siFilament_m,    info_text,      new_label);
 
             koef = imperial_units ? pow(ObjectManipulation::mm_to_in, 3) : 1.0f;
@@ -1359,6 +1359,12 @@ void Sidebar::update_ui_from_settings()
     // update Cut gizmo, if it's open
     p->plater->canvas3D()->update_gizmos_on_off_state();
     p->plater->canvas3D()->request_extra_frame();
+
+    //update legend
+    if (p->plater->is_preview_shown()) {
+        p->plater->set_current_canvas_as_dirty();
+        p->plater->get_current_canvas3D()->render();
+    }
 }
 
 std::vector<PlaterPresetComboBox*>& Sidebar::combos_filament()

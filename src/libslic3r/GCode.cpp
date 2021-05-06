@@ -994,7 +994,6 @@ namespace DoExport {
 	                dst.first += buf;
 	                ++ dst.second;
 	            };
-//	            print_statistics.filament_stats.insert(std::pair<size_t, float>{extruder.id(), (float)used_filament});
 	            append(out_filament_used_mm,  "%.2lf", used_filament);
 	            append(out_filament_used_cm3, "%.2lf", extruded_volume * 0.001);
 	            if (filament_weight > 0.) {

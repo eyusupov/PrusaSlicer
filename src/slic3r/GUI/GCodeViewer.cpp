@@ -17,6 +17,7 @@
 #include "GLCanvas3D.hpp"
 #include "GLToolbar.hpp"
 #include "GUI_Preview.hpp"
+#include "GUI_ObjectManipulation.hpp"
 #include <imgui/imgui_internal.h>
 
 #include <GL/glew.h>
@@ -4050,10 +4051,12 @@ void GCodeViewer::render_legend() const
     const float icon_size = ImGui::GetTextLineHeight();
     const float percent_bar_size = 2.0f * ImGui::GetTextLineHeight();
 
+    bool imperial_units = wxGetApp().app_config->get("use_inches") == "1";
+
 #if ENABLE_SCROLLABLE_LEGEND
-    auto append_item = [this, icon_size, percent_bar_size, &imgui](EItemType type, const Color& color, const std::string& label,
+    auto append_item = [this, icon_size, percent_bar_size, &imgui, imperial_units](EItemType type, const Color& color, const std::string& label,
 #else
-    auto append_item = [this, draw_list, icon_size, percent_bar_size, &imgui](EItemType type, const Color& color, const std::string& label,
+    auto append_item = [this, draw_list, icon_size, percent_bar_size, &imgui, imperial_units](EItemType type, const Color& color, const std::string& label,
 #endif // ENABLE_SCROLLABLE_LEGEND
         bool visible = true, const std::string& time = "", float percent = 0.0f, float max_percent = 0.0f, const std::array<float, 4>& offsets = { 0.0f, 0.0f, 0.0f, 0.0f },
         double used_filament_m = 0.0, double used_filament_g = 0.0,
@@ -4137,10 +4140,10 @@ void GCodeViewer::render_legend() const
                 ::sprintf(buf, "%.1f%%", 100.0f * percent);
                 ImGui::TextUnformatted((percent > 0.0f) ? buf : "");
                 ImGui::SameLine(offsets[2]);
-                ::sprintf(buf, "%.2fm", used_filament_m);
+                ::sprintf(buf, imperial_units ? "%.2f in" : "%.2f m", used_filament_m);
                 imgui.text(buf);
                 ImGui::SameLine(offsets[3]);
-                ::sprintf(buf, "%.2fg", used_filament_g);
+                ::sprintf(buf, "%.2f g", used_filament_g);
                 imgui.text(buf);
             }
         }
@@ -4149,10 +4152,10 @@ void GCodeViewer::render_legend() const
             if (used_filament_m > 0.0) {
                 char buf[64];
                 ImGui::SameLine(offsets[0]);
-                ::sprintf(buf, "%.2fm", used_filament_m);
+                ::sprintf(buf, imperial_units ? "%.2f in" : "%.2f m", used_filament_m);
                 imgui.text(buf);
                 ImGui::SameLine(offsets[1]);
-                ::sprintf(buf, "%.2fg", used_filament_g);
+                ::sprintf(buf, "%.2f g", used_filament_g);
                 imgui.text(buf);
             }
         }
@@ -4263,9 +4266,13 @@ void GCodeViewer::render_legend() const
         return (it != time_mode.roles_times.end()) ? std::make_pair(it->second, it->second / time_mode.time) : std::make_pair(0.0f, 0.0f);
     };
 
-    auto used_filament_per_role = [this](ExtrusionRole role) {
+    auto used_filament_per_role = [this, imperial_units](ExtrusionRole role) {
         auto it = m_print_statistics.used_filaments_per_role.find(role);
-        return (it != m_print_statistics.used_filaments_per_role.end()) ? std::make_pair(it->second.first, it->second.second) : std::make_pair(0.0, 0.0);
+        if (it == m_print_statistics.used_filaments_per_role.end())
+            return std::make_pair(0.0, 0.0);
+
+        double koef = imperial_units ? 1000.0 / ObjectManipulation::in_to_mm : 1.0;
+        return std::make_pair(it->second.first * koef, it->second.second);
     };
 
     // data used to properly align items in columns when showing time
@@ -4296,7 +4303,7 @@ void GCodeViewer::render_legend() const
         std::string longest_percentage_string;
         for (double item : percents) {
             char buffer[64];
-            ::sprintf(buffer, "%.2f m", item);
+            ::sprintf(buffer, "%.2f %%", item);
             if (::strlen(buffer) > longest_percentage_string.length())
                 longest_percentage_string = buffer;
         }
@@ -4307,7 +4314,7 @@ void GCodeViewer::render_legend() const
         std::string longest_used_filament_string;
         for (double item : used_filaments_m) {
             char buffer[64];
-            ::sprintf(buffer, "%.2f m", item);
+            ::sprintf(buffer, imperial_units ? "%.2f in" : "%.2f m", item);
             if (::strlen(buffer) > longest_used_filament_string.length())
                 longest_used_filament_string = buffer;
         }
@@ -4316,14 +4323,17 @@ void GCodeViewer::render_legend() const
     }
 
     // get used filament (meters and grams) from used volume in respect to the active extruder
-    auto get_used_filament_from_volume = [](double volume, int extruder_id) {
+    auto get_used_filament_from_volume = [imperial_units](double volume, int extruder_id) {
         const std::vector<std::string>& filament_presets = wxGetApp().preset_bundle->filament_presets;
         const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
+
+        double koef = imperial_units ? 1.0/ObjectManipulation::in_to_mm : 0.001;
+
         std::pair<double, double>  ret = { 0.0, 0.0 };
         if (const Preset* filament_preset = filaments.find_preset(filament_presets[extruder_id], false)) {
             double filament_radius = 0.5 * filament_preset->config.opt_float("filament_diameter", 0);
             double s = PI * sqr(filament_radius);
-            ret.first = volume / s * 0.001;
+            ret.first = volume / s * koef;
             double filament_density = filament_preset->config.opt_float("filament_density", 0);
             ret.second = volume * filament_density * 0.001;
         }
@@ -4345,7 +4355,7 @@ void GCodeViewer::render_legend() const
         std::string longest_used_filament_string;
         for (double item : used_filaments_m) {
             char buffer[64];
-            ::sprintf(buffer, "%.2f m", item);
+            ::sprintf(buffer, imperial_units ? "%.2f in" : "%.2f m", item);
             if (::strlen(buffer) > longest_used_filament_string.length())
                 longest_used_filament_string = buffer;
         }
@@ -4580,7 +4590,7 @@ void GCodeViewer::render_legend() const
             imgui.text(short_time(get_time_dhms(times.second - times.first)));
         };
 
-        auto append_print = [&imgui](const Color& color, const std::array<float, 4>& offsets, const Times& times, std::pair<double, double> used_filament) {
+        auto append_print = [&imgui, imperial_units](const Color& color, const std::array<float, 4>& offsets, const Times& times, std::pair<double, double> used_filament) {
             imgui.text(_u8L("Print"));
             ImGui::SameLine();
 
@@ -4599,7 +4609,7 @@ void GCodeViewer::render_legend() const
             if (used_filament.first > 0.0f) {
                 char buffer[64];
                 ImGui::SameLine(offsets[2]);
-                ::sprintf(buffer, "%.2f m", used_filament.first);
+                ::sprintf(buffer, imperial_units ? "%.2f in" : "%.2f m", used_filament.first);
                 imgui.text(buffer);
 
                 ImGui::SameLine(offsets[3]);
@@ -4628,7 +4638,7 @@ void GCodeViewer::render_legend() const
             for (const PartialTime& item : partial_times) {
                 if (item.used_filament.first > 0.0f) {
                     char buffer[64];
-                    ::sprintf(buffer, "%.2f m", item.used_filament.first);
+                    ::sprintf(buffer, imperial_units ? "%.2f in" : "%.2f m", item.used_filament.first);
                     if (::strlen(buffer) > longest_used_filament_string.length())
                         longest_used_filament_string = buffer;
                 }
