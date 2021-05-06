@@ -4056,6 +4056,7 @@ void GCodeViewer::render_legend() const
     auto append_item = [this, draw_list, icon_size, percent_bar_size, &imgui](EItemType type, const Color& color, const std::string& label,
 #endif // ENABLE_SCROLLABLE_LEGEND
         bool visible = true, const std::string& time = "", float percent = 0.0f, float max_percent = 0.0f, const std::array<float, 4>& offsets = { 0.0f, 0.0f, 0.0f, 0.0f },
+        double used_filament_m = 0.0f, double used_filament_g = 0.0f,
         std::function<void()> callback = nullptr) {
         if (!visible)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.3333f);
@@ -4135,10 +4136,26 @@ void GCodeViewer::render_legend() const
                 char buf[64];
                 ::sprintf(buf, "%.1f%%", 100.0f * percent);
                 ImGui::TextUnformatted((percent > 0.0f) ? buf : "");
+                ImGui::SameLine(offsets[2]);
+                ::sprintf(buf, "%.2fm", used_filament_m);
+                imgui.text(buf);
+                ImGui::SameLine(offsets[3]);
+                ::sprintf(buf, "%.2fg", used_filament_g);
+                imgui.text(buf);
             }
         }
-        else
+        else {
             imgui.text(label);
+            if (used_filament_m > 0.0f) {
+                char buf[64];
+                ImGui::SameLine(offsets[0]);
+                ::sprintf(buf, "%.2fm", used_filament_m);
+                imgui.text(buf);
+                ImGui::SameLine(offsets[1]);
+                ::sprintf(buf, "%.2fg", used_filament_g);
+                imgui.text(buf);
+            }
+        }
 
         if (!visible)
             ImGui::PopStyleVar();
@@ -4246,11 +4263,18 @@ void GCodeViewer::render_legend() const
         return (it != time_mode.roles_times.end()) ? std::make_pair(it->second, it->second / time_mode.time) : std::make_pair(0.0f, 0.0f);
     };
 
+    auto used_filament_per_role = [this](ExtrusionRole role) {
+        auto it = m_print_statistics.used_filaments_per_role.find(role);
+        return (it != m_print_statistics.used_filaments_per_role.end()) ? std::make_pair(it->second.first, it->second.second) : std::make_pair(0.0f, 0.0f);
+    };
+
     // data used to properly align items in columns when showing time
     std::array<float, 4> offsets = { 0.0f, 0.0f, 0.0f, 0.0f };
     std::vector<std::string> labels;
     std::vector<std::string> times;
     std::vector<float> percents;
+    std::vector<double> used_filaments_m;
+    std::vector<double> used_filaments_g;
     float max_percent = 0.0f;
 
     if (m_view_type == EViewType::FeatureType) {
@@ -4263,10 +4287,70 @@ void GCodeViewer::render_legend() const
                 times.push_back((time > 0.0f) ? short_time(get_time_dhms(time)) : "");
                 percents.push_back(percent);
                 max_percent = std::max(max_percent, percent);
+                auto [used_filament_m, used_filament_g] = used_filament_per_role(role);
+                used_filaments_m.push_back(used_filament_m);
+                used_filaments_g.push_back(used_filament_g);
             }
         }
 
-        offsets = calculate_offsets(labels, times, { _u8L("Feature type"), _u8L("Time") }, icon_size);
+        std::string longest_percentage_string;
+        for (double item : percents) {
+            char buffer[64];
+            ::sprintf(buffer, "%.2f m", item);
+            if (::strlen(buffer) > longest_percentage_string.length())
+                longest_percentage_string = buffer;
+        }
+        longest_percentage_string += "            ";
+        if (_u8L("Percentage").length() > longest_percentage_string.length())
+            longest_percentage_string = _u8L("Percentage");
+
+        std::string longest_used_filament_string;
+        for (double item : used_filaments_m) {
+            char buffer[64];
+            ::sprintf(buffer, "%.2f m", item);
+            if (::strlen(buffer) > longest_used_filament_string.length())
+                longest_used_filament_string = buffer;
+        }
+
+        offsets = calculate_offsets(labels, times, { _u8L("Feature type"), _u8L("Time"), longest_percentage_string, longest_used_filament_string }, icon_size);
+    }
+
+    // get used filament (meters and grams) from used volume in respect to the active extruder
+    auto get_used_filament_from_volume = [](double volume, int extruder_id) {
+        const std::vector<std::string>& filament_presets = wxGetApp().preset_bundle->filament_presets;
+        const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
+        std::pair<double, double>  ret = { 0.0f, 0.0f };
+        if (const Preset* filament_preset = filaments.find_preset(filament_presets[extruder_id], false)) {
+            double filament_radius = 0.5 * filament_preset->config.opt_float("filament_diameter", 0);
+            double s = PI * sqr(filament_radius);
+            ret.first = volume / s * 0.001;
+            double filament_density = filament_preset->config.opt_float("filament_density", 0);
+            ret.second = volume * filament_density * 0.001;
+        }
+        return ret;
+    };
+
+    if (m_view_type == EViewType::Tool) {
+        // calculate used filaments data
+        for (size_t extruder_id : m_extruder_ids) {
+            if (m_print_statistics.volumes_per_extruder.find(extruder_id) == m_print_statistics.volumes_per_extruder.end())
+                continue;
+            double volume = m_print_statistics.volumes_per_extruder.at(extruder_id);
+
+            auto [used_filament_m, used_filament_g] = get_used_filament_from_volume(volume, extruder_id);
+            used_filaments_m.push_back(used_filament_m);
+            used_filaments_g.push_back(used_filament_g);
+        }
+
+        std::string longest_used_filament_string;
+        for (double item : used_filaments_m) {
+            char buffer[64];
+            ::sprintf(buffer, "%.2f m", item);
+            if (::strlen(buffer) > longest_used_filament_string.length())
+                longest_used_filament_string = buffer;
+        }
+
+        offsets = calculate_offsets(labels, times, { "Extruder NNN", longest_used_filament_string }, icon_size);
     }
 
     // extrusion paths section -> title
@@ -4274,7 +4358,7 @@ void GCodeViewer::render_legend() const
     {
     case EViewType::FeatureType:
     {
-        append_headers({ _u8L("Feature type"), _u8L("Time"), _u8L("Percentage") }, offsets);
+        append_headers({ _u8L("Feature type"), _u8L("Time"), _u8L("Percentage"), _u8L("Used filament") }, offsets);
         break;
     }
     case EViewType::Height:         { imgui.title(_u8L("Height (mm)")); break; }
@@ -4283,7 +4367,11 @@ void GCodeViewer::render_legend() const
     case EViewType::FanSpeed:       { imgui.title(_u8L("Fan Speed (%)")); break; }
     case EViewType::Temperature:    { imgui.title(_u8L("Temperature (°C)")); break; }
     case EViewType::VolumetricRate: { imgui.title(_u8L("Volumetric flow rate (mm³/s)")); break; }
-    case EViewType::Tool:           { imgui.title(_u8L("Tool")); break; }
+    case EViewType::Tool:
+    {
+        append_headers({ _u8L("Tool"), _u8L("Used filament") }, offsets);
+        break;
+    }
     case EViewType::ColorPrint:     { imgui.title(_u8L("Color Print")); break; }
     default: { break; }
     }
@@ -4299,7 +4387,7 @@ void GCodeViewer::render_legend() const
                 continue;
             const bool visible = is_visible(role);
             append_item(EItemType::Rect, Extrusion_Role_Colors[static_cast<unsigned int>(role)], labels[i],
-                visible, times[i], percents[i], max_percent, offsets, [this, role, visible]() {
+                visible, times[i], percents[i], max_percent, offsets, used_filaments_m[i], used_filaments_g[i], [this, role, visible]() {
                     Extrusions* extrusions = const_cast<Extrusions*>(&m_extrusions);
                     extrusions->role_visibility_flags = visible ? extrusions->role_visibility_flags & ~(1 << role) : extrusions->role_visibility_flags | (1 << role);
                     // update buffers' render paths
@@ -4321,8 +4409,11 @@ void GCodeViewer::render_legend() const
     case EViewType::Tool:
     {
         // shows only extruders actually used
-        for (unsigned char i : m_extruder_ids) {
-            append_item(EItemType::Rect, m_tool_colors[i], _u8L("Extruder") + " " + std::to_string(i + 1));
+        size_t i = 0;
+        for (unsigned char extruder_id : m_extruder_ids) {
+            append_item(EItemType::Rect, m_tool_colors[extruder_id], _u8L("Extruder") + " " + std::to_string(extruder_id + 1), 
+                        true, "", 0.0f, 0.0f, offsets, used_filaments_m[i], used_filaments_g[i]);
+            i++;
         }
         break;
     }
@@ -4426,22 +4517,8 @@ void GCodeViewer::render_legend() const
         };
         using PartialTimes = std::vector<PartialTime>;
 
-        auto generate_partial_times = [this](const TimesList& times, const std::vector<double>& used_filaments) {
+        auto generate_partial_times = [this, get_used_filament_from_volume](const TimesList& times, const std::vector<double>& used_filaments) {
             PartialTimes items;
-
-            auto get_used_filament = [](double volume, int extruder_id) {
-                const std::vector<std::string>& filament_presets = wxGetApp().preset_bundle->filament_presets;
-                const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
-                std::pair<double, double>  ret = { 0.0f, 0.0f };
-                if (const Preset* filament_preset = filaments.find_preset(filament_presets[extruder_id], false)) {
-                    double filament_radius = 0.5*filament_preset->config.opt_float("filament_diameter", 0);
-                    double s = PI * sqr(filament_radius);
-                    ret.first = volume / s * 0.001;
-                    double filament_density = filament_preset->config.opt_float("filament_density", 0);
-                    ret.second = volume * filament_density * 0.001;
-                }
-                return ret;
-            };
 
             std::vector<CustomGCode::Item> custom_gcode_per_print_z = wxGetApp().plater()->model().custom_gcode_per_print_z.gcodes;
             int extruders_count = wxGetApp().extruders_edited_cnt();
@@ -4466,14 +4543,14 @@ void GCodeViewer::render_legend() const
                 case CustomGCode::ColorChange: {
                     auto it = std::find_if(custom_gcode_per_print_z.begin(), custom_gcode_per_print_z.end(), [time_rec](const CustomGCode::Item& item) { return item.type == time_rec.first; });
                     if (it != custom_gcode_per_print_z.end()) {
-                        items.push_back({ PartialTime::EType::Print, it->extruder, last_color[it->extruder - 1], Color(), time_rec.second, get_used_filament(used_filaments[color_change_idx++], it->extruder-1) });
+                        items.push_back({ PartialTime::EType::Print, it->extruder, last_color[it->extruder - 1], Color(), time_rec.second, get_used_filament_from_volume(used_filaments[color_change_idx++], it->extruder-1) });
                         items.push_back({ PartialTime::EType::ColorChange, it->extruder, last_color[it->extruder - 1], decode_color(it->color), time_rec.second });
                         last_color[it->extruder - 1] = decode_color(it->color);
                         last_extruder_id = it->extruder;
                         custom_gcode_per_print_z.erase(it);
                     }
                     else
-                        items.push_back({ PartialTime::EType::Print, last_extruder_id, last_color[last_extruder_id - 1], Color(), time_rec.second, get_used_filament(used_filaments[color_change_idx++], last_extruder_id -1) });
+                        items.push_back({ PartialTime::EType::Print, last_extruder_id, last_color[last_extruder_id - 1], Color(), time_rec.second, get_used_filament_from_volume(used_filaments[color_change_idx++], last_extruder_id -1) });
 
                     break;
                 }
@@ -4560,7 +4637,7 @@ void GCodeViewer::render_legend() const
             offsets = calculate_offsets(labels, times, { _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), longest_used_filament_string }, 2.0f * icon_size);
 
             ImGui::Spacing();
-            append_headers({ _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), /*_u8L("Filament (m)"), _u8L("Filament (g)")*/_u8L("Used filament") }, offsets);
+            append_headers({ _u8L("Event"), _u8L("Remaining time"), _u8L("Duration"), _u8L("Used filament") }, offsets);
 #if ENABLE_SCROLLABLE_LEGEND
             const bool need_scrollable = static_cast<float>(partial_times.size()) * (icon_size + ImGui::GetStyle().ItemSpacing.y) > child_height;
             if (need_scrollable)

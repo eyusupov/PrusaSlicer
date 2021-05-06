@@ -191,10 +191,18 @@ void GCodeProcessor::UsedFilaments::reset()
     color_change_cache = 0.0f;
     volumes_per_color_change = std::vector<double>();
 
-    active_extruder_id = 0;
-
     tool_change_cache = 0.0f;
     volumes_per_extruder.clear();
+
+    role_cache = 0.0f;
+    filaments_per_role.clear();
+}
+
+void GCodeProcessor::UsedFilaments::increase_caches(double extruded_volume)
+{
+    color_change_cache  += extruded_volume;
+    tool_change_cache   += extruded_volume;
+    role_cache          += extruded_volume;
 }
 
 void GCodeProcessor::UsedFilaments::process_color_change_cache()
@@ -205,8 +213,9 @@ void GCodeProcessor::UsedFilaments::process_color_change_cache()
     }
 }
 
-void GCodeProcessor::UsedFilaments::process_extruder_cache()
+void GCodeProcessor::UsedFilaments::process_extruder_cache(GCodeProcessor* processor)
 {
+    size_t active_extruder_id = processor->m_extruder_id;
     if (tool_change_cache != 0.0f) {
         if (volumes_per_extruder.find(active_extruder_id) != volumes_per_extruder.end())
             volumes_per_extruder[active_extruder_id] += tool_change_cache;
@@ -216,10 +225,31 @@ void GCodeProcessor::UsedFilaments::process_extruder_cache()
     }
 }
 
-void GCodeProcessor::UsedFilaments::process_caches()
+void GCodeProcessor::UsedFilaments::process_role_cache(GCodeProcessor* processor)
+{
+    if (role_cache != 0.0f) {
+        std::pair<double, double> filament = { 0.0f, 0.0f };
+
+        double s = PI * sqr(0.5 * processor->m_filament_diameters[processor->m_extruder_id]);
+        filament.first = role_cache/s * 0.001;
+        filament.second = role_cache * processor->m_filament_densities[processor->m_extruder_id] * 0.001;
+
+        ExtrusionRole active_role = processor->m_extrusion_role;
+        if (filaments_per_role.find(active_role) != filaments_per_role.end()) {
+            filaments_per_role[active_role].first  += filament.first;
+            filaments_per_role[active_role].second += filament.second;
+        }
+        else
+            filaments_per_role[active_role] = filament;
+        role_cache = 0.0f;
+    }
+}
+
+void GCodeProcessor::UsedFilaments::process_caches(GCodeProcessor* processor)
 {
     process_color_change_cache();
-    process_extruder_cache();
+    process_extruder_cache(processor);
+    process_role_cache(processor);
 }
 
 void GCodeProcessor::TimeMachine::reset()
@@ -862,6 +892,11 @@ void GCodeProcessor::apply_config(const PrintConfig& config)
         m_filament_diameters[i] = static_cast<float>(config.filament_diameter.values[i]);
     }
 
+    m_filament_densities.resize(config.filament_density.values.size());
+    for (size_t i = 0; i < config.filament_density.values.size(); ++i) {
+        m_filament_densities[i] = static_cast<float>(config.filament_density.values[i]);
+    }
+
     if ((m_flavor == gcfMarlinLegacy || m_flavor == gcfMarlinFirmware) && config.machine_limits_usage.value != MachineLimitsUsage::Ignore) {
         m_time_processor.machine_limits = reinterpret_cast<const MachineEnvelopeConfig&>(config);
         if (m_flavor == gcfMarlinLegacy) {
@@ -923,6 +958,13 @@ void GCodeProcessor::apply_config(const DynamicPrintConfig& config)
     if (filament_diameters != nullptr) {
         for (double diam : filament_diameters->values) {
             m_filament_diameters.push_back(static_cast<float>(diam));
+        }
+    }
+
+    const ConfigOptionFloats* filament_densities = config.option<ConfigOptionFloats>("filament_density");
+    if (filament_densities != nullptr) {
+        for (double dens : filament_densities->values) {
+            m_filament_densities.push_back(static_cast<float>(dens));
         }
     }
 
@@ -1117,6 +1159,7 @@ void GCodeProcessor::reset()
     }
 
     m_filament_diameters = std::vector<float>(Min_Extruder_Count, 1.75f);
+    m_filament_densities = std::vector<float>(Min_Extruder_Count, 1.245f);
     m_extruded_last_z = 0.0f;
     m_g1_line_id = 0;
     m_layer_id = 0;
@@ -1212,7 +1255,7 @@ void GCodeProcessor::process_file(const std::string& filename, bool apply_postpr
             gcode_time.times.push_back({ CustomGCode::ColorChange, gcode_time.cache });
     }
 
-    m_used_filaments.process_caches();
+    m_used_filaments.process_caches(this);
 
     update_estimated_times_stats();
 
@@ -1481,6 +1524,7 @@ void GCodeProcessor::process_tags(const std::string_view comment)
 #if ENABLE_VALIDATE_CUSTOM_GCODE
     // extrusion role tag
     if (boost::starts_with(comment, reserved_tag(ETags::Role))) {
+        m_used_filaments.process_role_cache(this);
         m_extrusion_role = ExtrusionEntity::string_to_role(comment.substr(reserved_tag(ETags::Role).length()));
         return;
     }
@@ -2190,8 +2234,7 @@ void GCodeProcessor::process_G1(const GCodeReader::GCodeLine& line)
         float area_toolpath_cross_section = volume_extruded_filament / delta_xyz;
 
         // save extruded volume to the cache
-        m_used_filaments.color_change_cache += volume_extruded_filament;
-        m_used_filaments.tool_change_cache  += volume_extruded_filament;
+        m_used_filaments.increase_caches(volume_extruded_filament);
 
         // volume extruded filament / tool displacement = area toolpath cross section
         m_mm3_per_mm = area_toolpath_cross_section;
@@ -2832,6 +2875,7 @@ void GCodeProcessor::process_T(const std::string_view command)
                     BOOST_LOG_TRIVIAL(error) << "GCodeProcessor encountered an invalid toolchange, maybe from a custom gcode.";
                 else {
                     unsigned char old_extruder_id = m_extruder_id;
+                    process_filaments(CustomGCode::ToolChange);
                     m_extruder_id = id;
                     m_cp_color.current = m_extruder_colors[id];
                     // Specific to the MK3 MMU2:
@@ -2841,9 +2885,6 @@ void GCodeProcessor::process_T(const std::string_view command)
                     m_time_processor.extruder_unloaded = false;
                     extra_time += get_filament_load_time(static_cast<size_t>(m_extruder_id));
                     simulate_st_synchronize(extra_time);
-
-                    process_filaments(CustomGCode::ToolChange);
-                    m_used_filaments.active_extruder_id = id;
                 }
 
                 // store tool change move
@@ -3019,7 +3060,7 @@ void GCodeProcessor::process_filaments(CustomGCode::Type code)
         m_used_filaments.process_color_change_cache();
 
     if (code == CustomGCode::ToolChange)
-        m_used_filaments.process_extruder_cache();
+        m_used_filaments.process_extruder_cache(this);
 }
 
 void GCodeProcessor::simulate_st_synchronize(float additional_time)
@@ -3046,8 +3087,9 @@ void GCodeProcessor::update_estimated_times_stats()
     else
         m_result.print_statistics.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Stealth)].reset();
 
-    m_result.print_statistics.volumes_per_color_change = m_used_filaments.volumes_per_color_change;
-    m_result.print_statistics.volumes_per_extruder = m_used_filaments.volumes_per_extruder;
+    m_result.print_statistics.volumes_per_color_change  = m_used_filaments.volumes_per_color_change;
+    m_result.print_statistics.volumes_per_extruder      = m_used_filaments.volumes_per_extruder;
+    m_result.print_statistics.used_filaments_per_role   = m_used_filaments.filaments_per_role;
 }
 
 } /* namespace Slic3r */

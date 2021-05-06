@@ -634,11 +634,16 @@ namespace DoExport {
         for (auto volume : result.print_statistics.volumes_per_extruder) {
             total_extruded_volume += volume.second;
 
-            double s = PI * sqr(0.5* extruders[volume.first].filament_diameter());
-            double weight = volume.second * extruders[volume.first].filament_density() * 0.001;
+            size_t extruder_id = volume.first;
+            auto extruder = std::find_if(extruders.begin(), extruders.end(), [extruder_id](const Extruder& extr) { return extr.id() == extruder_id; });
+            if (extruder == extruders.end())
+                continue;
+
+            double s = PI * sqr(0.5* extruder->filament_diameter());
+            double weight = volume.second * extruder->filament_density() * 0.001;
             total_used_filament += volume.second/s;
             total_weight        += weight;
-            total_cost          += weight * extruders[volume.first].filament_cost() * 0.001;
+            total_cost          += weight * extruder->filament_cost() * 0.001;
         }
 
         print_statistics.total_extruded_volume = total_extruded_volume;

@@ -56,8 +56,9 @@ namespace Slic3r {
             }
         };
 
-        std::vector<double>         volumes_per_color_change;
-        std::map<size_t, double>    volumes_per_extruder;
+        std::vector<double>                                 volumes_per_color_change;
+        std::map<size_t, double>                            volumes_per_extruder;
+        std::map<ExtrusionRole, std::pair<double, double>>  used_filaments_per_role;
 
         std::array<Mode, static_cast<size_t>(ETimeMode::Count)> modes;
 
@@ -69,6 +70,7 @@ namespace Slic3r {
             }
             volumes_per_color_change.clear();
             volumes_per_extruder.clear();
+            used_filaments_per_role.clear();
         }
     };
 
@@ -331,14 +333,23 @@ namespace Slic3r {
             double color_change_cache;
             std::vector<double> volumes_per_color_change;
 
-            size_t active_extruder_id;
             double tool_change_cache;
             std::map<size_t, double> volumes_per_extruder;
 
+            double role_cache;
+            //       ExtrusionRole : <used_filament_m, used_filament_g>
+            std::map<ExtrusionRole, std::pair<double, double>> filaments_per_role;
+
             void reset();
+
+            void increase_caches(double extruded_volume);
+
             void process_color_change_cache();
-            void process_extruder_cache();
-            void process_caches();
+            void process_extruder_cache(GCodeProcessor* processor);
+            void process_role_cache(GCodeProcessor* processor);
+            void process_caches(GCodeProcessor* processor);
+
+            friend class GCodeProcessor;
         };
 
     public:
@@ -509,6 +520,7 @@ namespace Slic3r {
         ExtruderColors m_extruder_colors;
         ExtruderTemps m_extruder_temps;
         std::vector<float> m_filament_diameters;
+        std::vector<float> m_filament_densities;
         float m_extruded_last_z;
         unsigned int m_g1_line_id;
         unsigned int m_layer_id;
