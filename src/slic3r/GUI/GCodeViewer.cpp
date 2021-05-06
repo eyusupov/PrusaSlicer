@@ -4056,7 +4056,7 @@ void GCodeViewer::render_legend() const
     auto append_item = [this, draw_list, icon_size, percent_bar_size, &imgui](EItemType type, const Color& color, const std::string& label,
 #endif // ENABLE_SCROLLABLE_LEGEND
         bool visible = true, const std::string& time = "", float percent = 0.0f, float max_percent = 0.0f, const std::array<float, 4>& offsets = { 0.0f, 0.0f, 0.0f, 0.0f },
-        double used_filament_m = 0.0f, double used_filament_g = 0.0f,
+        double used_filament_m = 0.0, double used_filament_g = 0.0,
         std::function<void()> callback = nullptr) {
         if (!visible)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.3333f);
@@ -4146,7 +4146,7 @@ void GCodeViewer::render_legend() const
         }
         else {
             imgui.text(label);
-            if (used_filament_m > 0.0f) {
+            if (used_filament_m > 0.0) {
                 char buf[64];
                 ImGui::SameLine(offsets[0]);
                 ::sprintf(buf, "%.2fm", used_filament_m);
@@ -4265,7 +4265,7 @@ void GCodeViewer::render_legend() const
 
     auto used_filament_per_role = [this](ExtrusionRole role) {
         auto it = m_print_statistics.used_filaments_per_role.find(role);
-        return (it != m_print_statistics.used_filaments_per_role.end()) ? std::make_pair(it->second.first, it->second.second) : std::make_pair(0.0f, 0.0f);
+        return (it != m_print_statistics.used_filaments_per_role.end()) ? std::make_pair(it->second.first, it->second.second) : std::make_pair(0.0, 0.0);
     };
 
     // data used to properly align items in columns when showing time
@@ -4319,7 +4319,7 @@ void GCodeViewer::render_legend() const
     auto get_used_filament_from_volume = [](double volume, int extruder_id) {
         const std::vector<std::string>& filament_presets = wxGetApp().preset_bundle->filament_presets;
         const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
-        std::pair<double, double>  ret = { 0.0f, 0.0f };
+        std::pair<double, double>  ret = { 0.0, 0.0 };
         if (const Preset* filament_preset = filaments.find_preset(filament_presets[extruder_id], false)) {
             double filament_radius = 0.5 * filament_preset->config.opt_float("filament_diameter", 0);
             double s = PI * sqr(filament_radius);
