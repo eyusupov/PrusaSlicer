@@ -1,6 +1,8 @@
 #ifndef slic3r_GCodeSender_hpp_
 #define slic3r_GCodeSender_hpp_
 
+#define BOOST_BIND_NO_PLACEHOLDERS
+
 #include "libslic3r.h"
 #include <queue>
 #include <string>

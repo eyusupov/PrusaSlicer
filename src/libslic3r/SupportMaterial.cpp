@@ -12,7 +12,7 @@
 #include <boost/log/trivial.hpp>
 
 #include <tbb/parallel_for.h>
-#include <tbb/atomic.h>
+#include <atomic>
 #include <tbb/spin_mutex.h>
 #include <tbb/task_group.h>
 

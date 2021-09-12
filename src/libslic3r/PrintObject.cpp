@@ -19,7 +19,7 @@
 #include <float.h>
 
 #include <tbb/parallel_for.h>
-#include <tbb/atomic.h>
+#include <atomic>
 
 #include <Shiny/Shiny.h>
 

@@ -7,6 +7,8 @@
 	#endif
 #endif
 
+#define BOOST_BIND_NO_PLACEHOLDERS
+
 #include <float.h>
 #include <math.h>
 #include <stdarg.h>
@@ -93,12 +95,11 @@
 #include <boost/thread.hpp>
 #include <boost/version.hpp>
 
-#include <tbb/atomic.h>
+#include <atomic>
 #include <tbb/parallel_for.h>
 #include <tbb/spin_mutex.h>
-#include <tbb/mutex.h>
+#include <mutex>
 #include <tbb/task_group.h>
-#include <tbb/task_scheduler_init.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>

@@ -12,7 +12,7 @@
 #include <libslic3r/MTUtils.hpp>
 
 #include <tbb/parallel_for.h>
-#include <tbb/mutex.h>
+#include <mutex>
 #include <future>
 
 const std::string USAGE_STR = {

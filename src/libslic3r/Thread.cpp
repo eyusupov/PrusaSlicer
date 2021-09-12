@@ -12,7 +12,7 @@
 #include <tbb/parallel_for.h>
 #include <tbb/tbb_thread.h>
 #include <tbb/task_arena.h>
-#include <tbb/task_scheduler_init.h>
+#include <tbb/global_control.h>
 
 #include "Thread.hpp"
 
@@ -206,8 +206,8 @@ void name_tbb_thread_pool_threads()
 	nthreads = 1;
 #endif
 
-	if (nthreads != nthreads_hw) 
-		new tbb::task_scheduler_init(int(nthreads));
+	if (nthreads != nthreads_hw)
+		new tbb::global_control(tbb::global_control::max_allowed_parallelism,int(nthreads));
 
 	std::atomic<size_t>		nthreads_running(0);
 	std::condition_variable cv;
